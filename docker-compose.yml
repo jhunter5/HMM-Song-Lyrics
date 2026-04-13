@@ -1,0 +1,28 @@
+services:
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - reverse-proxy
+    networks:
+      - pipeline
+
+  reverse-proxy:
+    build: ./reverse-proxy
+    ports:
+      - "8080:8080"
+    depends_on:
+      - processing-service
+    networks:
+      - pipeline
+
+  processing-service:
+    build: ./text-processing
+    networks:
+      - pipeline
+
+networks:
+  pipeline:
+    driver: bridge
