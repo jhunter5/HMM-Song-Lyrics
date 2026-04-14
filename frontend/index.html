@@ -184,20 +184,30 @@
     }
 
     submitBtn.addEventListener('click', async () => {
-      const formData = new FormData();
-      formData.append('audio',  audioInput.files[0]);
-      formData.append('lyrics', lyricsInput.files[0]);
+      const lyricsForm = new FormData();
+      lyricsForm.append('lyrics', lyricsInput.files[0]);
+      lyricsForm.append('audio',  audioInput.files[0]);   // YARP forwards it; text service ignores it
+
+      const audioForm = new FormData();
+      audioForm.append('audio', audioInput.files[0]);
 
       submitBtn.disabled = true;
-      setStatus('Uploading...', 'info');
+      setStatus('Processing...', 'info');
 
       try {
-        const res = await fetch('/api/upload', { method: 'POST', body: formData });
-        if (res.ok) {
-          setStatus(`Done — ${res.status} ${res.statusText}`, 'success');
+        const [textRes, musicRes] = await Promise.all([
+          fetch('/api/upload',         { method: 'POST', body: lyricsForm }),
+          fetch('/api/process-audio',  { method: 'POST', body: audioForm  }),
+        ]);
+
+        const failed = [];
+        if (!textRes.ok)  failed.push(`text processor ${textRes.status}`);
+        if (!musicRes.ok) failed.push(`music processor ${musicRes.status}`);
+
+        if (failed.length) {
+          setStatus(`Error: ${failed.join(' | ')}`, 'error');
         } else {
-          const body = await res.text();
-          setStatus(`Server error ${res.status}: ${body}`, 'error');
+          setStatus('Done — lyrics and audio processed successfully', 'success');
         }
       } catch (err) {
         setStatus(`Request failed: ${err.message}`, 'error');

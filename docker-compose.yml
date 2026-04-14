@@ -15,11 +15,17 @@ services:
       - "8080:8080"
     depends_on:
       - processing-service
+      - music-processing-service
     networks:
       - pipeline
 
   processing-service:
     build: ./text-processing
+    networks:
+      - pipeline
+
+  music-processing-service:
+    build: ./music-processing
     networks:
       - pipeline
 
