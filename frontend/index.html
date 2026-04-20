@@ -15,6 +15,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      padding: 2rem 1rem;
     }
 
     .card {
@@ -24,7 +25,10 @@
       padding: 2rem;
       width: 100%;
       max-width: 480px;
+      transition: max-width 0.3s ease;
     }
+
+    .card.expanded { max-width: 720px; }
 
     h1 {
       font-size: 1.3rem;
@@ -33,9 +37,7 @@
       color: #fff;
     }
 
-    .field {
-      margin-bottom: 1.2rem;
-    }
+    .field { margin-bottom: 1.2rem; }
 
     label {
       display: block;
@@ -71,16 +73,8 @@
       height: 100%;
     }
 
-    .drop-zone .hint {
-      font-size: 0.85rem;
-      color: #555;
-    }
-
-    .drop-zone .selected {
-      font-size: 0.9rem;
-      color: #a0e0b0;
-      word-break: break-all;
-    }
+    .drop-zone .hint   { font-size: 0.85rem; color: #555; }
+    .drop-zone .selected { font-size: 0.9rem; color: #a0e0b0; word-break: break-all; }
 
     button {
       width: 100%;
@@ -110,11 +104,58 @@
     #status.info    { background: #1a2535; color: #7ab3f0; display: block; }
     #status.success { background: #122418; color: #6fcf97; display: block; }
     #status.error   { background: #2a1212; color: #eb5757; display: block; }
+
+    /* ── Karaoke player ──────────────────────────────────── */
+
+    #karaokeView { display: none; margin-top: 1.5rem; }
+    #karaokeView.visible { display: block; }
+
+    #karaokeTitle {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #aaa;
+      margin-bottom: 0.8rem;
+      text-align: center;
+    }
+
+    #audioPlayer {
+      width: 100%;
+      margin-bottom: 1rem;
+      accent-color: #6c63ff;
+    }
+
+    .lyrics-display {
+      height: 320px;
+      overflow-y: auto;
+      padding: 1.2rem 1.4rem;
+      background: #111;
+      border-radius: 8px;
+      border: 1px solid #2e2e2e;
+      scroll-behavior: smooth;
+    }
+
+    .lyric-line {
+      margin-bottom: 1rem;
+      line-height: 2;
+      font-size: 1.15rem;
+    }
+
+    .lyric-word {
+      display: inline;
+      padding: 1px 3px;
+      border-radius: 4px;
+      transition: background 0.08s, color 0.08s;
+    }
+
+    .lyric-word.active {
+      background: #6c63ff;
+      color: #fff;
+    }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>Song Lyrics Pipeline</h1>
+  <div class="card" id="card">
+    <h1>Hidden Markov Model Song To Lyrics</h1>
 
     <div class="field">
       <label>Audio file (.mp3)</label>
@@ -134,6 +175,13 @@
 
     <button id="submitBtn" disabled>Upload &amp; Process</button>
     <div id="status"></div>
+
+    <!-- Karaoke player (hidden until processing succeeds) -->
+    <div id="karaokeView">
+      <div id="karaokeTitle"></div>
+      <audio id="audioPlayer" controls></audio>
+      <div class="lyrics-display" id="lyricsDisplay"></div>
+    </div>
   </div>
 
   <script>
@@ -141,6 +189,8 @@
     const lyricsInput = document.getElementById('lyricsFile');
     const submitBtn   = document.getElementById('submitBtn');
     const statusEl    = document.getElementById('status');
+
+    // ── File upload helpers ──────────────────────────────────
 
     function updateHint(input, hintId) {
       const hint = document.getElementById(hintId);
@@ -183,10 +233,116 @@
       statusEl.className   = type;
     }
 
+    // ── Karaoke player ───────────────────────────────────────
+
+    let wordSpans = [];   // flat: [{ el, start, end, lineEl }]
+    let activeIdx = -1;
+
+    function renderKaraoke(data, audioFile) {
+      const player  = document.getElementById('audioPlayer');
+      const display = document.getElementById('lyricsDisplay');
+
+      document.getElementById('karaokeTitle').textContent = data.title ?? '';
+      player.src = URL.createObjectURL(audioFile);
+      display.innerHTML = '';
+      wordSpans = [];
+      activeIdx = -1;
+
+      for (const line of data.lines) {
+        const lineEl = document.createElement('div');
+        lineEl.className = 'lyric-line';
+
+        for (let wi = 0; wi < line.words.length; wi++) {
+          const w    = line.words[wi];
+          const span = document.createElement('span');
+          span.className   = 'lyric-word';
+          span.textContent = w.text;
+          lineEl.appendChild(span);
+          if (wi < line.words.length - 1) lineEl.appendChild(document.createTextNode(' '));
+          wordSpans.push({ el: span, start: w.start_seconds, end: w.end_seconds, lineEl });
+        }
+
+        display.appendChild(lineEl);
+      }
+
+      document.getElementById('card').classList.add('expanded');
+      document.getElementById('karaokeView').classList.add('visible');
+
+      player.addEventListener('timeupdate', onTimeUpdate);
+      player.addEventListener('seeked',     onTimeUpdate);
+    }
+
+    function onTimeUpdate() {
+      const t = document.getElementById('audioPlayer').currentTime;
+
+      let found = -1;
+      for (let i = 0; i < wordSpans.length; i++) {
+        if (t >= wordSpans[i].start && t < wordSpans[i].end) { found = i; break; }
+      }
+
+      if (found === activeIdx) return;
+
+      if (activeIdx !== -1) wordSpans[activeIdx].el.classList.remove('active');
+
+      activeIdx = found;
+
+      if (activeIdx !== -1) {
+        const { el, lineEl } = wordSpans[activeIdx];
+        el.classList.add('active');
+        lineEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+
+    // ── Mock data (replace with real /api/pair response) ────
+    // Matches the agreed contract exactly.
+    function buildMockKaraoke() {
+      return {
+        song_id: "mock-001",
+        title: "Mock Result — replace with /api/pair response",
+        duration_seconds: 30,
+        lines: [
+          {
+            line_index: 0, start_seconds: 1.0, end_seconds: 5.5,
+            words: [
+              { word_index: 0, text: "Hello",    start_seconds: 1.0, end_seconds: 1.6 },
+              { word_index: 1, text: "darkness", start_seconds: 1.7, end_seconds: 2.4 },
+              { word_index: 2, text: "my",       start_seconds: 2.5, end_seconds: 2.8 },
+              { word_index: 3, text: "old",      start_seconds: 2.9, end_seconds: 3.3 },
+              { word_index: 4, text: "friend",   start_seconds: 3.4, end_seconds: 4.5 },
+            ]
+          },
+          {
+            line_index: 1, start_seconds: 5.8, end_seconds: 10.5,
+            words: [
+              { word_index: 0, text: "I've",   start_seconds: 5.8,  end_seconds: 6.2  },
+              { word_index: 1, text: "come",   start_seconds: 6.3,  end_seconds: 6.7  },
+              { word_index: 2, text: "to",     start_seconds: 6.8,  end_seconds: 7.0  },
+              { word_index: 3, text: "talk",   start_seconds: 7.1,  end_seconds: 7.6  },
+              { word_index: 4, text: "with",   start_seconds: 7.7,  end_seconds: 8.0  },
+              { word_index: 5, text: "you",    start_seconds: 8.1,  end_seconds: 8.5  },
+              { word_index: 6, text: "again",  start_seconds: 8.6,  end_seconds: 9.5  },
+            ]
+          },
+          {
+            line_index: 2, start_seconds: 11.0, end_seconds: 16.0,
+            words: [
+              { word_index: 0, text: "Because", start_seconds: 11.0, end_seconds: 11.6 },
+              { word_index: 1, text: "a",       start_seconds: 11.7, end_seconds: 11.9 },
+              { word_index: 2, text: "vision",  start_seconds: 12.0, end_seconds: 12.6 },
+              { word_index: 3, text: "softly",  start_seconds: 12.7, end_seconds: 13.3 },
+              { word_index: 4, text: "creeping", start_seconds: 13.4, end_seconds: 14.2 },
+            ]
+          },
+        ]
+      };
+    }
+
+    // ── Submit ───────────────────────────────────────────────
+
     submitBtn.addEventListener('click', async () => {
       const lyricsForm = new FormData();
       lyricsForm.append('lyrics', lyricsInput.files[0]);
-      lyricsForm.append('audio',  audioInput.files[0]);   // YARP forwards it; text service ignores it
+      lyricsForm.append('audio',  audioInput.files[0]);
 
       const audioForm = new FormData();
       audioForm.append('audio', audioInput.files[0]);
@@ -196,8 +352,8 @@
 
       try {
         const [textRes, musicRes] = await Promise.all([
-          fetch('/api/upload',         { method: 'POST', body: lyricsForm }),
-          fetch('/api/process-audio',  { method: 'POST', body: audioForm  }),
+          fetch('/api/upload',        { method: 'POST', body: lyricsForm }),
+          fetch('/api/process-audio', { method: 'POST', body: audioForm  }),
         ]);
 
         const failed = [];
@@ -207,7 +363,12 @@
         if (failed.length) {
           setStatus(`Error: ${failed.join(' | ')}`, 'error');
         } else {
-          setStatus('Done — lyrics and audio processed successfully', 'success');
+          setStatus('Done — showing mock karaoke (pair service pending)', 'success');
+
+          // TODO: replace buildMockKaraoke() with:
+          //   const pairRes  = await fetch('/api/pair', { method: 'POST', body: ... });
+          //   const pairData = await pairRes.json();
+          renderKaraoke(buildMockKaraoke(), audioInput.files[0]);
         }
       } catch (err) {
         setStatus(`Request failed: ${err.message}`, 'error');
